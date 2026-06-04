@@ -1,0 +1,176 @@
+#!/bin/bash -e
+# Based on https://benou.fr/www/ben/debian-10-on-cubox.html
+# See also https://ambience.sk/reviving-cubox-i-first-gen-marvell-sheeva-with-debian/
+TMPDIR=/tmp/cubox
+MMC_DEVICE=/dev/mmcblk0
+DEBIAN_RELEASE=trixie
+HOSTNAME=cubox
+PACKAGES="qemu-user-static f2fs-tools util-linux fdisk parted"
+
+if [[ `whoami` != 'root' ]]; then
+    echo "Please run this script with root rights."
+    exit 1
+fi
+
+if [[ ! -e $MMC_DEVICE ]]; then
+    echo "Can not find $MMC_DEVICE device!"
+    exit 1
+fi
+
+if [[ ! which gum > /dev/null 2>&1 ]]; then
+    echo "Please install gum: https://github.com/charmbracelet/gum"
+    exit 1
+fi
+
+function mount_mmc() {
+    mkdir ${TMPDIR} > /dev/null 2>&1 || true
+    mount ${MMC_DEVICE}p2 ${TMPDIR}
+
+    mkdir ${TMPDIR}/boot > /dev/null 2>&1 || true
+    mount ${MMC_DEVICE}p1 ${TMPDIR}/boot
+
+    for d in /dev /proc /sys /dev/pts; do
+        mount --bind $d  ${TMPDIR}$d
+    done
+}
+
+function umount_mmc() {
+    echo "Unmount all mount points"
+    for d in `mount | grep $TMPDIR | cut -d ' ' -f3|sort -r`; do umount -f $d; done
+    echo "Unmount all mmc device partitions"
+    for p in `mount | grep ^/dev/mmcblk0 | sort -n| cut -d ' ' -f1`; do umount -f $p; done
+}
+
+function remount_mmc() {
+    umount_mmc
+    mount_mmc
+}
+
+function format_root() {
+    mkfs.f2fs -f ${MMC_DEVICE}p2
+}
+
+function format_boot() {
+    mkfs.ext4 -F ${MMC_DEVICE}p1
+}
+
+
+apt-get install -y --no-upgrade $PACKAGES
+
+FORMATED=
+if gum confirm "Do you want prepare partition tables on $MMC_DEVICE?"; then
+    umount_mmc
+    wipefs -a "$MMC_DEVICE"
+    sfdisk "$MMC_DEVICE" <<EOF
+label: dos
+
+size=200MiB, type=83, bootable
+type=83
+EOF
+    partprobe "$MMC_DEVICE"
+    udevadm settle
+
+    umount_mmc
+    format_boot
+    umount_mmc
+    format_root
+    FORMATED=y
+fi
+
+remount_mmc
+
+
+#Install Debian: we need to do it in 2 steps, and we'll use qemu ARM userspace emulator to finalize:
+NEED_1ST_STAGE=
+if test -f ${TMPDIR}/bin/dpkg; then
+    if gum confirm "Found files from 1st stage in $TMPDIR. You you want restart 1st stage?"; then
+        umount_mmc
+        format_root
+        NEED_1ST_STAGE=y
+    fi
+else
+    NEED_1ST_STAGE=y
+    if [[ "$FORMATED" != "y" ]]; then
+        umount_mmc
+        format_root
+        umount_mmc
+        format_boot
+    fi
+fi
+
+remount_mmc
+
+if [[ "$NEED_1ST_STAGE" == "y" ]]; then
+    debootstrap --foreign --arch=armhf ${DEBIAN_RELEASE} ${TMPDIR} https://mirror.yandex.ru/debian/
+fi
+
+
+if [[ ! -f /usr/bin/qemu-arm-static ]]; then
+    apt install qemu-user-static
+fi
+if [[ ! -f ${TMPDIR}/usr/bin/qemu-arm-static ]]; then
+
+    cp /usr/bin/qemu-arm-static ${TMPDIR}/usr/bin/
+
+fi
+
+mount
+
+chroot ${TMPDIR} env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" /bin/bash <<'END_CHROOT_SCRIPT'
+echo "MMC DEVICE: $MMC_DEVICE"
+export LANG=C.UTF-8
+export LANGUAGE=
+echo "-----> Second stage"
+test -e /debootstrap/debootstrap && /debootstrap/debootstrap --second-stage
+
+echo "-----> Install packages"
+apt install linux-image-armmp u-boot-tools f2fs-tools locales
+
+echo "-----> Initramfs"
+cat > /etc/initramfs-tools/modules << EOF
+f2fs
+fscrypto
+crc32c
+crc32
+sdhci
+sdhci-pltfm
+sdhci-dove
+mvsdio
+EOF
+update-initramfs -u
+
+echo "-----> Make boot.scr"
+TMPFILE="$(mktemp)"
+cat > "$TMPFILE" << EOF
+setenv bootargs console=ttyS0,115200n8 console=tty1,115200 root=${MMC_DEVICE}p2 rootfstype=f2fs rootwait video=HDMI-A-1:1920x1080-32@60 debug=vc
+ext4load mmc 0 0x08000000 /uImage
+ext4load mmc 0 0x09000000 /uInitrd
+bootm 0x08000000 0x09000000
+EOF
+mkimage -A arm -O linux -C none  -T script -n script -d "$TMPFILE" /boot/boot.scr
+
+echo "-----> Make uImage"
+cat /vmlinuz /usr/lib/linux-image-$(readlink -f /vmlinuz|cut -d '-' -f 2-)/dove-cubox.dtb > "$TMPFILE"
+mkimage -A arm -O linux -C none  -T kernel -a 0x00008000 -e 0x00008000 -n 'Linux-cubox' -d "$TMPFILE" /boot/uImage
+rm -f "$TMPFILE"
+
+echo "-----> Make uInitrd"
+mkimage -A arm -O linux -C none  -T ramdisk -a 0x1000000 -n 'Initrd-cubox' -d /initrd.img /boot/uInitrd
+
+echo "-----> Final preparations"
+systemctl enable getty@ttyS0.service
+cat > /etc/fstab << EOF
+${MMC_DEVICE}p2  /       f2fs    defaults        0       1
+${MMC_DEVICE}p1  /boot   ext4    defaults        0       2
+EOF
+hostname $HOSTNAME
+
+echo "-----> Remove password for root"
+passwd -d root
+
+END_CHROOT_SCRIPT
+
+
+umount_mmc
+
+
