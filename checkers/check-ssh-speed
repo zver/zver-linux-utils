@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+#
+#  Lightweight SSH connectivity and throughput checker.
+#  
+#  Purpose:
+#  This tool tests a list of remote hosts for SSH availability and estimates
+#  effective network throughput over SSH connections. It is designed for unstable
+#  or high-latency networks where simple ping/port checks are insufficient.
+#
+#  What it does:
+#  - Attempts SSH connection to each host using key-based authentication
+#  - Sends a controlled data stream over SSH
+#  - Measures transfer speed in kbit/s
+#  - Performs multiple runs per host and uses median value for stability
+#  - Filters hosts based on minimum required bandwidth threshold
+#
+#  Key features:
+#  - Parallel execution across multiple hosts
+#  - Configurable number of concurrent workers (-n)
+#  - Configurable minimum bandwidth threshold (-l, in kbit/s)
+#  - Configurable SSH timeout (-t)
+#  - Optional SSH private key selection (-i)
+#  - Multiple test runs per host with median result (-c)
+#
+#  Example:
+#      ./check-ssh-speed -n 2 -l 64 -c 5 -t 10 -i ~/.ssh/id_rsa \
+#      -u user1 192.168.20.2,192.168.20.3,192.168.20.5
+#
+#  Output:
+#  - Lists hosts that are reachable via SSH
+#  - Shows estimated median throughput per host
+#  - Filters out hosts below the configured bandwidth threshold
+
+import argparse
+import subprocess
+import time
+import statistics
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def build_ssh_cmd(user, ip, key, timeout):
+    cmd = [
+        "ssh",
+        "-o", "BatchMode=yes",
+        "-o", f"ConnectTimeout={timeout}",
+    ]
+
+    if key:
+        cmd += ["-i", key]
+
+    if user:
+        cmd.append(f"{user}@{ip}")
+    else:
+        cmd.append(f"{ip}")
+    return cmd
+
+
+def run_single_test(ip, user, key, timeout, test_mb):
+    ssh_cmd = build_ssh_cmd(user, ip, key, timeout) + ["wc -c"]
+
+    payload = b"A" * (test_mb * 1024 * 1024)
+
+    start = time.time()
+
+    try:
+        p = subprocess.run(
+            ssh_cmd,
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout + 5
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+    end = time.time()
+
+    if p.returncode != 0:
+        return None
+
+    try:
+        received = int((p.stdout or b"0").decode().strip())
+    except:
+        return None
+
+    if received <= 0:
+        return None
+
+    duration = end - start
+    if duration <= 0:
+        return None
+
+    bps = received / duration
+    return (bps * 8) / 1024  # kbit/s
+
+
+def run_speed_test(ip, args):
+    results = []
+
+    for _ in range(args.count):
+        speed = run_single_test(ip, args.user, args.key, args.timeout, args.test_mb)
+
+        if speed is not None:
+            results.append(speed)
+
+    if not results:
+        return None
+
+    return statistics.median(results)
+
+
+def check_ip(ip, args):
+    speed = run_speed_test(ip, args)
+
+    if speed is None:
+        return (ip, False, 0)
+
+    ok = speed >= args.l
+    return (ip, ok, speed)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("ips", help="comma-separated IP list")
+    parser.add_argument("-n", type=int, default=2, help="parallel threads")
+    parser.add_argument("-l", type=float, default=64, help="min speed in kbit/s")
+    parser.add_argument("-t", "--timeout", type=int, default=10)
+
+    parser.add_argument("-i", "--identity", dest="key", default=None)
+    parser.add_argument("-u", "--user", default="root")
+
+    parser.add_argument("-c", "--count", type=int, default=1,
+                        help="number of test runs per IP")
+
+    parser.add_argument("--test-mb", type=int, default=2,
+                        help="payload size per test in MB")
+
+    args = parser.parse_args()
+
+    ips = [ip.strip() for ip in args.ips.split(",") if ip.strip()]
+
+    print(
+        f"Checking {len(ips)} hosts | threads={args.n} | "
+        f"limit={args.l} kbit/s | runs={args.count}"
+    )
+
+    with ThreadPoolExecutor(max_workers=args.n) as executor:
+        futures = {executor.submit(check_ip, ip, args): ip for ip in ips}
+
+        for f in as_completed(futures):
+            ip, ok, speed = f.result()
+
+            if ok:
+                print(f"✅-OK {ip} {speed:.2f} kbit/s")
+            else:
+                print(f"❌-FAIL {ip} {speed:.2f} kbit/s")
+
+if __name__ == "__main__":
+    main()
