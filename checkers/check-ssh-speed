@@ -43,6 +43,8 @@ def build_ssh_cmd(user, ip, key, timeout):
         "ssh",
         "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={timeout}",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
     ]
 
     if key:
