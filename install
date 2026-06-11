@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+
+cd $(dirname $0)
+
+DEST_DIR=${BINDIR:-/usr/local/bin}
+echo "Destination dir: $DEST_DIR"
+
+for d in `find . -maxdepth 1 -type d | sed -e 's,^./,,g' | egrep -v '^\.' | sort`; do
+    echo -n "Install $d ... "
+    for f in `find $d -type f`; do
+        cp $f $DEST_DIR
+        chmod 0755 "$DEST_DIR/$(basename $f)"
+    done
+    echo ok
+done
