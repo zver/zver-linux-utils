@@ -43,4 +43,5 @@ ssh -N \
         -o UserKnownHostsFile=/dev/null \
         -i $SSH_KEY_FILE \
         $SSH_USER@$SSH_HOST \
-        -L $LOCAL_PORT:$SSH_HOST:$REMOTE_PORT
+        -L $LOCAL_PORT:$SSH_HOST:$REMOTE_PORT \
+        2>&1 | egrep -v 'Warning: Permanently added .* to the list of known hosts'
