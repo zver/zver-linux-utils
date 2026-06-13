@@ -23,14 +23,16 @@ REMOTE_PORT=2080
 # Add user
 
 ```
-useradd \
+sudo useradd \
     --create-home \
     --shell /usr/sbin/nologin \
     tunnel
+sudo -u tunnel ssh-keygen -t ed25519
+cat /home/tunnel/.ssh/id_ed25519.pub | sudo -u tunnel tee /home/tunnel/.ssh/authorized_keys >/dev/null
 ```
 
 
-# Limit user rights in sshd on $SSH_HOST
+# Limit user rights in sshd config (/etc/ssh/sshd_config) on $SSH_HOST
 
 ```
 Match User tunnel
