@@ -1,19 +1,5 @@
 #!/bin/bash
-# Tests connectivity and throughput to a list of SSH jump hosts, selects the
-# best-performing host, and creates a local SSH port-forwarding tunnel to the
-# target server through the selected jump host.
-#
-# Example config file /etc/ssh-port-forwarding:
-#
-#SSH_JUMP_KEY_FILE=/etc/key2
-#SSH_JUMP_USER=user2
-#SSH_JUMP_HOSTS="192.168.10.1,192.168.10.2"
-#SSH_KEY_FILE=/etc/key1
-#SSH_USER=user1
-#SSH_HOST=1.1.1.1
-#LOCAL_PORT=12080
-#REMOTE_PORT=2080
-
+# See ssh-port-forwarding.README.md for details
 
 set -euo pipefail
 
