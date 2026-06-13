@@ -4,25 +4,31 @@
 set -euo pipefail
 
 source /etc/${0##*/}.conf
+SSH='ssh'
 
-BEST_HOST=`check-ssh-speed -c 1 -n 10 -l 32 -t 10 -u $SSH_JUMP_USER -i  $SSH_JUMP_KEY_FILE \
+if [[ -n $SSH_JUMP_HOSTS ]]; then
+    BEST_JUMP_HOST=`check-ssh-speed -c 1 -n 10 -l 32 -t 10 -u $SSH_JUMP_USER -i  $SSH_JUMP_KEY_FILE \
         $SSH_JUMP_HOSTS \
         | grep OK | LANG=C sort -k3,3 -nr | head -n1 | cut -d ' ' -f2`
 
-if [[ -z "$BEST_HOST" ]]; then
+    if [[ -z "$BEST_JUMP_HOST" ]]; then
         echo "Can not connect to any HOST" >&2
         exit 1
-fi
+    fi
 
-echo "New best host for ssh jump host: $BEST_HOST"
+    echo "New best host for ssh jump host: $BEST_JUMP_HOST"
 
-ssh -N \
-        -o "ProxyCommand=ssh \
+    SSH='ssh \
+            -o "ProxyCommand=ssh \
                 -o ExitOnForwardFailure=yes \
                 -o ServerAliveInterval=60 \
                 -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null \
-                -i $SSH_JUMP_KEY_FILE -W %h:%p $SSH_JUMP_USER@$BEST_HOST" \
+                -i '$SSH_JUMP_KEY_FILE' -W %h:%p '$SSH_JUMP_USER'@'$BEST_JUMP_HOST'"'
+fi
+
+$SSH \
+        -N \
         -o ExitOnForwardFailure=yes \
         -o ServerAliveInterval=60 \
         -o StrictHostKeyChecking=no \

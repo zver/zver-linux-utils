@@ -1,9 +1,9 @@
 
-
 Tests connectivity and throughput to a list of SSH jump hosts, selects the
 best-performing host, and creates a local SSH port-forwarding tunnel to the
-target server through the selected jump host.
-
+target server through the selected jump host. If SSH_JUMP_HOSTS is set to an
+empty value, the tunnel is established directly to the target server without
+using a jump host.
 
 # Example config file /etc/ssh-port-forwarding
 
@@ -28,7 +28,9 @@ sudo useradd \
     --shell /usr/sbin/nologin \
     tunnel
 sudo -u tunnel ssh-keygen -t ed25519
-cat /home/tunnel/.ssh/id_ed25519.pub | sudo -u tunnel tee /home/tunnel/.ssh/authorized_keys >/dev/null
+cat /home/tunnel/.ssh/id_ed25519.pub \
+    | sudo -u tunnel tee /home/tunnel/.ssh/authorized_keys \
+    >/dev/null
 ```
 
 
