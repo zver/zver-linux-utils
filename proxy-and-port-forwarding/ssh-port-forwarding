@@ -73,7 +73,7 @@ ssh -F "$CONFIG_FILE" \
     -N \
     -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=60 \
-    -L "$LOCAL_PORT:$SSH_HOST:$REMOTE_PORT" \
+    -L "$LOCAL_BIND_ADDRESS:$LOCAL_PORT:$SSH_HOST:$REMOTE_PORT" \
     target \
     2>&1 | egrep -v 'Warning: Permanently added .* to the list of known hosts'
 
