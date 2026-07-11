@@ -8,14 +8,20 @@ using a jump host.
 # Example config file /etc/ssh-port-forwarding
 
 ```
+# SSH params for jump host if you want to use it.
 SSH_JUMP_KEY_FILE=/etc/user2_key
 SSH_JUMP_USER=user2
 SSH_JUMP_HOSTS="192.168.10.1,192.168.10.2"
 
+# Params for check-ssh-speed utils inside ssh-port-forwarding
+CHECK_SSH_SPEED_OPTIONS="-c 1 -n 1 -l 32 -t 10"
+
+# Target ssh host connection params
 SSH_KEY_FILE=/etc/tunnel_key
 SSH_USER=tunnel
 SSH_HOST=1.1.1.1
 
+# Port forwarding options
 LOCAL_BIND_ADDRESS=0.0.0.0
 LOCAL_PORT=12080
 REMOTE_PORT=2080

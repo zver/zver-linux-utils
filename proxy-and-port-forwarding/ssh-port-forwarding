@@ -21,7 +21,7 @@ if [[ -n "${SSH_JUMP_HOSTS:-}" ]]; then
 
     BEST_JUMP_HOST="$(
         check-ssh-speed \
-            -c 1 -n 10 -l 32 -t 10 \
+            $CHECK_SSH_SPEED_OPTIONS \
             -u "$SSH_JUMP_USER" \
             -i "$SSH_JUMP_KEY_FILE" \
             $SSH_JUMP_HOSTS \
