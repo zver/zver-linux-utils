@@ -26,6 +26,10 @@
 #      ./check-ssh-speed -n 2 -l 64 -c 5 -t 10 -i ~/.ssh/id_rsa \
 #      -u user1 192.168.20.2,192.168.20.3,192.168.20.5
 #
+#  Note: high parallelism (-n) increases per-check time,
+#  so consider raising the timeout (-t) accordingly.
+#
+#
 #  Output:
 #  - Lists hosts that are reachable via SSH
 #  - Shows estimated median throughput per host
