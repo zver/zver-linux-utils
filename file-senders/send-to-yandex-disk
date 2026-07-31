@@ -3,7 +3,8 @@
 set -Eeuo pipefail
 
 readonly API_URL="https://cloud-api.yandex.net/v1/disk"
-declare TOKEN=""
+TOKEN=""
+FORCE_OVERWRITE=false
 
 
 # Prints script usage information.
@@ -18,6 +19,7 @@ Arguments:
 
 Options:
     -t TOKEN       OAuth token. Overrides YANDEX_DISK_TOKEN.
+    -f             Overwrite the destination file if it already exists.
 
 Environment:
     YANDEX_DISK_TOKEN
@@ -29,6 +31,10 @@ Examples:
     $0 /tmp/backup.tar.gz app:/backups/backup.tar.gz
 
     $0 -t y0_xxxxxxxxx /tmp/backup.tar.gz app:/backups/backup.tar.gz
+
+    $0 -f /tmp/backup.tar.gz app:/backups/backup.tar.gz
+
+    $0 -t y0_xxxxxxxxx -f /tmp/backup.tar.gz app:/backups/backup.tar.gz
 EOF
 }
 
@@ -72,20 +78,32 @@ api_request() {
         "$@"
 }
 
+# Performs an authenticated API request and returns only the HTTP status code.
+api_request_status() {
+    curl \
+        --silent \
+        --location \
+        --connect-timeout 10 \
+        --max-time 300 \
+        --retry 3 \
+        --retry-delay 2 \
+        -H "Authorization: OAuth $TOKEN" \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        "$@"
+}
+
 # Creates a single remote directory if it does not already exist.
 mkdir_remote() {
     local dir="$1"
     local status
 
     status=$(
-        api_request \
-            --output /dev/null \
-            --write-out '%{http_code}' \
+        api_request_status \
             --request PUT \
             --get \
             --data-urlencode "path=${dir}" \
-            "${API_URL}/resources" \
-            || true
+            "${API_URL}/resources"
     )
 
     case "$status" in
@@ -126,6 +144,19 @@ ensure_remote_dirs() {
     done
 }
 
+# Returns success if the remote file exists.
+remote_file_exists() {
+    local remote_file="$1"
+
+    api_request \
+        --output /dev/null \
+        --request GET \
+        --get \
+        --data-urlencode "path=${remote_file}" \
+        "${API_URL}/resources" \
+        >/dev/null 2>&1
+}
+
 # Requests a temporary upload URL.
 get_upload_url() {
     local remote_file="$1"
@@ -133,7 +164,7 @@ get_upload_url() {
     api_request \
         --get \
         --data-urlencode "path=${remote_file}" \
-        --data-urlencode "overwrite=true" \
+        --data-urlencode "overwrite=${FORCE_OVERWRITE}" \
         "${API_URL}/resources/upload" \
         | jq -er '.href'
 }
@@ -160,7 +191,7 @@ upload_file() {
 # Main program entry point.
 main() {
 
-    while getopts ":t:h" opt; do
+    while getopts ":t:fh" opt; do
         case "$opt" in
             t)
                 TOKEN="$OPTARG"
@@ -168,6 +199,9 @@ main() {
             h)
                 usage
                 exit 0
+                ;;
+            f)
+                FORCE_OVERWRITE=true
                 ;;
             :)
                 echo "Error: Option -$OPTARG requires an argument." >&2
@@ -204,6 +238,12 @@ main() {
     check_local_file "$local_file"
 
     ensure_remote_dirs "$remote_file"
+
+    if ! "$FORCE_OVERWRITE" && remote_file_exists "$remote_file"; then
+        echo "Error: Remote file '$remote_file' already exists." >&2
+        echo "Use -f to overwrite it." >&2
+        exit 1
+    fi
 
     upload_url="$(get_upload_url "$remote_file")"
 
