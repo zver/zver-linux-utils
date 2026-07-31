@@ -237,6 +237,11 @@ main() {
     require_commands
     check_local_file "$local_file"
 
+    # If the destination ends with '/', append the source file's name.
+    if [[ "$remote_file" == */ ]]; then
+        remote_file="${remote_file}$(basename -- "$local_file")"
+    fi
+
     ensure_remote_dirs "$remote_file"
 
     if ! "$FORCE_OVERWRITE" && remote_file_exists "$remote_file"; then
