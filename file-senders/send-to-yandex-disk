@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly API_URL="https://cloud-api.yandex.net/v1/disk"
+declare TOKEN=""
+
+
+# Prints script usage information.
+usage() {
+    cat <<EOF
+Usage:
+    $0 [-t oauth_token] <local_file> <remote_path>
+
+Arguments:
+    local_file     Path to the local file.
+    remote_path    Destination path on Yandex Disk.
+
+Options:
+    -t TOKEN       OAuth token. Overrides YANDEX_DISK_TOKEN.
+
+Environment:
+    YANDEX_DISK_TOKEN
+        OAuth token used when -t is not specified.
+
+Examples:
+    export YANDEX_DISK_TOKEN="y0_xxxxxxxxx"
+
+    $0 /tmp/backup.tar.gz app:/backups/backup.tar.gz
+
+    $0 -t y0_xxxxxxxxx /tmp/backup.tar.gz app:/backups/backup.tar.gz
+EOF
+}
+
+
+
+# Verifies that required external commands are installed.
+require_commands() {
+    local cmd
+
+    for cmd in curl jq; do
+        command -v "$cmd" >/dev/null 2>&1 || {
+            echo "Error: '$cmd' is not installed." >&2
+            exit 1
+        }
+    done
+}
+
+# Verifies that the local file exists.
+check_local_file() {
+    local file="$1"
+
+    [[ -f "$file" ]] || {
+        echo "Error: File '$file' does not exist." >&2
+        exit 1
+    }
+}
+
+# Performs an authenticated request to the Yandex Disk API.
+api_request() {
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        --location \
+        --connect-timeout 10 \
+        --max-time 300 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        -H "Authorization: OAuth $TOKEN" \
+        "$@"
+}
+
+# Creates a single remote directory if it does not already exist.
+mkdir_remote() {
+    local dir="$1"
+    local status
+
+    status=$(
+        api_request \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --request PUT \
+            --get \
+            --data-urlencode "path=${dir}" \
+            "${API_URL}/resources" \
+            || true
+    )
+
+    case "$status" in
+        201|409)
+            ;;
+        *)
+            echo "Error: Failed to create remote directory '$dir' (HTTP $status)." >&2
+            exit 1
+            ;;
+    esac
+}
+
+# Creates all parent directories required for the destination file.
+ensure_remote_dirs() {
+    local remote_file="$1"
+    local dir
+    local current=""
+    local part
+
+    dir="${remote_file%/*}"
+
+    # File is located in the application root.
+    [[ "$dir" == "$remote_file" ]] && return
+
+    IFS='/' read -ra parts <<<"$dir"
+
+    for part in "${parts[@]}"; do
+        if [[ -z "$current" ]]; then
+            current="$part"
+        else
+            current="$current/$part"
+        fi
+
+        # Skip the application root.
+        [[ "$current" == "app:" ]] && continue
+
+        mkdir_remote "$current"
+    done
+}
+
+# Requests a temporary upload URL.
+get_upload_url() {
+    local remote_file="$1"
+
+    api_request \
+        --get \
+        --data-urlencode "path=${remote_file}" \
+        --data-urlencode "overwrite=true" \
+        "${API_URL}/resources/upload" \
+        | jq -er '.href'
+}
+
+# Uploads the file using the temporary upload URL.
+upload_file() {
+    local local_file="$1"
+    local upload_url="$2"
+
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        --location \
+        --connect-timeout 10 \
+        --max-time 0 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        --upload-file "$local_file" \
+        "$upload_url"
+}
+
+# Main program entry point.
+main() {
+
+    while getopts ":t:h" opt; do
+        case "$opt" in
+            t)
+                TOKEN="$OPTARG"
+                ;;
+            h)
+                usage
+                exit 0
+                ;;
+            :)
+                echo "Error: Option -$OPTARG requires an argument." >&2
+                exit 1
+                ;;
+            \?)
+                echo "Error: Unknown option '-$OPTARG'." >&2
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    shift $((OPTIND - 1))
+
+    [[ $# -eq 2 ]] || {
+        usage
+        exit 1
+    }
+
+    TOKEN="${TOKEN:-${YANDEX_DISK_TOKEN:-}}"
+
+    [[ -n "$TOKEN" ]] || {
+        echo "Error: OAuth token is not specified." >&2
+        echo "Use -t or set YANDEX_DISK_TOKEN." >&2
+        exit 1
+    }
+
+    local local_file="$1"
+    local remote_file="$2"
+    local upload_url
+
+    require_commands
+    check_local_file "$local_file"
+
+    ensure_remote_dirs "$remote_file"
+
+    upload_url="$(get_upload_url "$remote_file")"
+
+    upload_file "$local_file" "$upload_url"
+
+    echo "Successfully uploaded '$local_file' to '$remote_file'."
+}
+
+main "$@"
