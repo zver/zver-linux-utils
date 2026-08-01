@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly API_URL="https://cloud-api.yandex.net/v1/disk"
+readonly LIST_LIMIT=200
+
+TOKEN=""
+PERMANENTLY=false
+DRY_RUN=false
+
+REMOTE_DIR=""
+MASK="*"
+THRESHOLD_EPOCH=""
+
+
+# Prints script usage information.
+usage() {
+    cat <<EOF
+Usage:
+    $0 [-t oauth_token] [-p] [-n] <remote_path[/mask]> <timestamp>
+
+Arguments:
+    remote_path[/mask]
+        Directory on Yandex Disk to clean up. Optionally the last path
+        component may be a glob mask that file names must match.
+
+        Examples:
+            app:/backup/redis*.tar.gz   -> dir "app:/backup", mask "redis*.tar.gz"
+            app:/backup/                -> dir "app:/backup", all files
+            app:/backup                 -> dir "app:/backup", all files
+
+    timestamp
+        Files modified earlier than this moment are deleted. Accepts a Unix
+        epoch (seconds) or any date/time string understood by 'date -d'
+        (e.g. "2024-01-15T00:00:00", "2024-01-15", "-7 days").
+
+Options:
+    -t TOKEN       OAuth token. Overrides YANDEX_DISK_TOKEN.
+    -p             Delete files permanently instead of moving to Trash.
+    -n             Dry run: only print what would be deleted.
+
+Environment:
+    YANDEX_DISK_TOKEN
+        OAuth token used when -t is not specified.
+
+Examples:
+    export YANDEX_DISK_TOKEN="y0_xxxxxxxxx"
+
+    $0 "app:/backup/redis*.tar.gz" "2024-01-01"
+
+    $0 -p "app:/backup/" 1704067200
+
+    $0 -n -t y0_xxxxxxxxx "app:/backup" "-30 days"
+EOF
+}
+
+
+# Verifies that required external commands are installed.
+require_commands() {
+    local cmd
+
+    for cmd in curl jq date; do
+        command -v "$cmd" >/dev/null 2>&1 || {
+            echo "Error: '$cmd' is not installed." >&2
+            exit 1
+        }
+    done
+}
+
+# Performs an authenticated request to the Yandex Disk API.
+api_request() {
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        --location \
+        --connect-timeout 10 \
+        --max-time 300 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        -H "Authorization: OAuth $TOKEN" \
+        "$@"
+}
+
+# Performs an authenticated API request and returns only the HTTP status code.
+api_request_status() {
+    curl \
+        --silent \
+        --location \
+        --connect-timeout 10 \
+        --max-time 300 \
+        --retry 3 \
+        --retry-delay 2 \
+        -H "Authorization: OAuth $TOKEN" \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        "$@"
+}
+
+# Splits the "<remote_path>[/mask]" argument into REMOTE_DIR and MASK.
+parse_target() {
+    local input="$1"
+    local trimmed="${input%/}"
+    local last="${trimmed##*/}"
+
+    if [[ -z "$trimmed" ]]; then
+        echo "Error: Empty remote path." >&2
+        exit 1
+    fi
+
+    if [[ "$last" == *[\*\?\[]* ]]; then
+        REMOTE_DIR="${trimmed%/*}"
+        MASK="$last"
+    else
+        REMOTE_DIR="$trimmed"
+        MASK="*"
+    fi
+}
+
+# Converts the timestamp argument (epoch seconds or a date(1)-parsable
+# string) to Unix epoch seconds.
+parse_timestamp() {
+    local input="$1"
+
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        THRESHOLD_EPOCH="$input"
+        return
+    fi
+
+    THRESHOLD_EPOCH="$(date -d "$input" +%s 2>/dev/null)" || {
+        echo "Error: Cannot parse timestamp '$input'." >&2
+        exit 1
+    }
+}
+
+# Converts an ISO-8601 timestamp returned by the API to Unix epoch seconds.
+to_epoch() {
+    date -d "$1" +%s 2>/dev/null
+}
+
+# Deletes a single remote file.
+delete_remote_file() {
+    local path="$1"
+    local status
+
+    if "$DRY_RUN"; then
+        echo "[dry-run] Would delete: $path"
+        return
+    fi
+
+    status=$(
+        api_request_status \
+            --request DELETE \
+            --get \
+            --data-urlencode "path=${path}" \
+            --data-urlencode "permanently=${PERMANENTLY}" \
+            "${API_URL}/resources"
+    )
+
+    case "$status" in
+        202|204)
+            echo "Deleted: $path"
+            ;;
+        *)
+            echo "Warning: Failed to delete '$path' (HTTP $status)." >&2
+            ;;
+    esac
+}
+
+# Lists all files in REMOTE_DIR (one level, non-recursive) that match MASK
+# and were modified earlier than THRESHOLD_EPOCH, then deletes them.
+cleanup_directory() {
+    local offset=0
+    local total=-1
+    local response
+    local count
+    local name modified path item_type item_epoch
+
+    while [[ "$offset" -eq 0 || "$offset" -lt "$total" ]]; do
+        response=$(
+            api_request \
+                --get \
+                --data-urlencode "path=${REMOTE_DIR}" \
+                --data-urlencode "limit=${LIST_LIMIT}" \
+                --data-urlencode "offset=${offset}" \
+                --data-urlencode "fields=_embedded.total,_embedded.items.name,_embedded.items.path,_embedded.items.type,_embedded.items.modified" \
+                "${API_URL}/resources"
+        )
+
+        total=$(jq -r '._embedded.total // 0' <<<"$response")
+        count=$(jq -r '._embedded.items | length' <<<"$response")
+
+        [[ "$count" -eq 0 ]] && break
+
+        while IFS=$'\t' read -r item_type name modified path; do
+            [[ "$item_type" == "file" ]] || continue
+            [[ "$name" == $MASK ]] || continue
+
+            item_epoch="$(to_epoch "$modified")" || {
+                echo "Warning: Cannot parse modification time for '$path'." >&2
+                continue
+            }
+
+            if [[ "$item_epoch" -lt "$THRESHOLD_EPOCH" ]]; then
+                delete_remote_file "$path"
+            fi
+        done < <(jq -r '._embedded.items[] | [.type, .name, .modified, .path] | @tsv' <<<"$response")
+
+        offset=$((offset + LIST_LIMIT))
+    done
+}
+
+# Main program entry point.
+main() {
+
+    while getopts ":t:pnh" opt; do
+        case "$opt" in
+            t)
+                TOKEN="$OPTARG"
+                ;;
+            p)
+                PERMANENTLY=true
+                ;;
+            n)
+                DRY_RUN=true
+                ;;
+            h)
+                usage
+                exit 0
+                ;;
+            :)
+                echo "Error: Option -$OPTARG requires an argument." >&2
+                exit 1
+                ;;
+            \?)
+                echo "Error: Unknown option '-$OPTARG'." >&2
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    shift $((OPTIND - 1))
+
+    [[ $# -eq 2 ]] || {
+        usage
+        exit 1
+    }
+
+    TOKEN="${TOKEN:-${YANDEX_DISK_TOKEN:-}}"
+
+    [[ -n "$TOKEN" ]] || {
+        echo "Error: OAuth token is not specified." >&2
+        echo "Use -t or set YANDEX_DISK_TOKEN." >&2
+        exit 1
+    }
+
+    require_commands
+    parse_target "$1"
+    parse_timestamp "$2"
+
+    echo "Directory: $REMOTE_DIR"
+    echo "Mask:      $MASK"
+    echo "Older than: $(date -d "@${THRESHOLD_EPOCH}" --iso-8601=seconds) (epoch ${THRESHOLD_EPOCH})"
+    "$DRY_RUN" && echo "Mode: dry run (no files will be deleted)"
+    echo
+
+    cleanup_directory
+
+    echo
+    echo "Done."
+}
+
+main "$@"
