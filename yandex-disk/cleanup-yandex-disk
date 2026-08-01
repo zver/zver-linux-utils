@@ -140,6 +140,28 @@ to_epoch() {
     date -d "$1" +%s 2>/dev/null
 }
 
+# Returns a human-readable explanation for an HTTP status code returned by
+# the Yandex Disk API.
+describe_status() {
+    local status="$1"
+
+    case "$status" in
+        400) echo "Bad Request - некорректный запрос (неверный путь или параметры)." ;;
+        401) echo "Unauthorized - OAuth-токен отсутствует или недействителен." ;;
+        403) echo "Forbidden - недостаточно прав для операции над этим ресурсом." ;;
+        404) echo "Not Found - ресурс не найден (возможно, уже удалён)." ;;
+        406) echo "Not Acceptable - сервер не может сформировать ответ в запрошенном формате." ;;
+        409) echo "Conflict - конфликт (например, путь уже занят)." ;;
+        413) echo "Payload Too Large - размер запроса/файла превышает допустимый." ;;
+        423) echo "Locked - ресурс заблокирован: над ним сейчас выполняется другая (асинхронная) операция, повторите попытку позже." ;;
+        429) echo "Too Many Requests - превышен лимит запросов к API, повторите попытку позже." ;;
+        500) echo "Internal Server Error - внутренняя ошибка на стороне Яндекс.Диска." ;;
+        503) echo "Service Unavailable - сервис временно недоступен." ;;
+        507) echo "Insufficient Storage - недостаточно места на Яндекс.Диске." ;;
+        *)   echo "неизвестный статус." ;;
+    esac
+}
+
 # Deletes a single remote file.
 delete_remote_file() {
     local path="$1"
@@ -164,7 +186,7 @@ delete_remote_file() {
             echo "Deleted: $path"
             ;;
         *)
-            echo "Warning: Failed to delete '$path' (HTTP $status)." >&2
+            echo "Warning: Failed to delete '$path' (HTTP $status - $(describe_status "$status"))" >&2
             ;;
     esac
 }
