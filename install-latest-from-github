@@ -3,11 +3,16 @@
 ACCOUNT=zver
 REPO=zver-linux-utils
 
-tmpdir=$(mktemp -d /tmp/$REPO.XXXXXX)
+tmpdir=$(mktemp -d "/tmp/$REPO.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT
 
-git clone https://github.com/$ACCOUNT/$REPO.git $tmpdir
+git clone "https://github.com/$ACCOUNT/$REPO.git" "$tmpdir"
 cd "$tmpdir"
 
 ls
-sudo ./install
+
+if [ "$EUID" -eq 0 ]; then
+    ./install
+else
+    sudo ./install
+fi
