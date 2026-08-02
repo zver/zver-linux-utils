@@ -99,6 +99,43 @@ api_request_status() {
         "$@"
 }
 
+# Detects whether the 'date' utility in use is the limited BusyBox
+# implementation (common in Alpine-based Docker images) rather than GNU
+# coreutils date.
+is_busybox_date() {
+    { date --version; date --help; } 2>&1 | grep -qi 'BusyBox'
+}
+
+# Prints a hint about limited BusyBox 'date' functionality (only once per
+# script run) to help diagnose "Cannot parse timestamp" / "Cannot parse
+# modification time" errors.
+DATE_HINT_SHOWN=false
+show_date_limitation_hint() {
+    "$DATE_HINT_SHOWN" && return
+    DATE_HINT_SHOWN=true
+
+    if is_busybox_date; then
+        cat >&2 <<EOF
+Hint: A BusyBox date command with limited functionality was detected.
+It does not support relative date expressions (such as -3 days,
+-30 minutes, etc.) or many of the date formats supported by GNU date.
+
+Solutions:
+
+- Install GNU Coreutils. For example, on Alpine: apk add coreutils
+  After that, /usr/bin/date from Coreutils will be used instead of
+  the BusyBox implementation.
+
+- Alternatively, pass the timestamp directly as a Unix epoch (seconds
+  since the Unix epoch). For example, compute it on the host using
+  GNU date: date -d '-3 days' +%s. Then pass the resulting numeric
+  timestamp.
+EOF
+    else
+        echo "Hint: A Unix epoch (seconds since the Unix epoch) or a date string recognized by the installed version of 'date -d' is expected." >&2
+    fi
+}
+
 # Splits the "<remote_path>[/mask]" argument into REMOTE_DIR and MASK.
 parse_target() {
     local input="$1"
@@ -131,13 +168,22 @@ parse_timestamp() {
 
     THRESHOLD_EPOCH="$(date -d "$input" +%s 2>/dev/null)" || {
         echo "Error: Cannot parse timestamp '$input'." >&2
+        show_date_limitation_hint
         exit 1
     }
 }
 
 # Converts an ISO-8601 timestamp returned by the API to Unix epoch seconds.
 to_epoch() {
-    date -d "$1" +%s 2>/dev/null
+    local result
+
+    if result="$(date -d "$1" +%s 2>/dev/null)"; then
+        echo "$result"
+        return 0
+    fi
+
+    show_date_limitation_hint
+    return 1
 }
 
 # Returns a human-readable explanation for an HTTP status code returned by
