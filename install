@@ -1,4 +1,6 @@
 #!/bin/bash
+# Install zver-linux-utils from local repo
+
 set -euo pipefail
 
 cd $(dirname $0)
@@ -9,13 +11,14 @@ echo "Destination dir: $DEST_DIR"
 for d in `find . -maxdepth 1 -type d | sed -e 's,^./,,g' | egrep -v '^\.' | sort`; do
     echo -n "Install $d ... "
     for f in `find $d -type f`; do
-        cp $f $DEST_DIR
         if [[ "$(basename $f)" == *README* ]]; then
             f_mode=0644
         else
             f_mode=0755
         fi
-        chmod "$f_mode" "$DEST_DIR/$(basename $f)"
+        install -m "$f_mode" "$f" "$DEST_DIR/"
     done
     echo ok
 done
+
+install -m 0755 install-latest-from-github $DEST_DIR/zver-linux-utils-update
