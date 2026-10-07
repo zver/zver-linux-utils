@@ -10,7 +10,12 @@ for d in `find . -maxdepth 1 -type d | sed -e 's,^./,,g' | egrep -v '^\.' | sort
     echo -n "Install $d ... "
     for f in `find $d -type f`; do
         cp $f $DEST_DIR
-        chmod 0755 "$DEST_DIR/$(basename $f)"
+        if [[ "$(basename $f)" == *README* ]]; then
+            f_mode=0644
+        else
+            f_mode=0755
+        fi
+        chmod "$f_mode" "$DEST_DIR/$(basename $f)"
     done
     echo ok
 done
