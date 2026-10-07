@@ -61,10 +61,10 @@ def build_ssh_cmd(user, ip, key, timeout):
     return cmd
 
 
-def run_single_test(ip, user, key, timeout, test_mb):
+def run_single_test(ip, user, key, timeout, test_kb):
     ssh_cmd = build_ssh_cmd(user, ip, key, timeout) + ["wc -c"]
 
-    payload = b"A" * (test_mb * 1024 * 1024)
+    payload = b"A" * (test_kb * 1024)
 
     start = time.time()
 
@@ -104,7 +104,7 @@ def run_speed_test(ip, args):
     results = []
 
     for _ in range(args.count):
-        speed = run_single_test(ip, args.user, args.key, args.timeout, args.test_mb)
+        speed = run_single_test(ip, args.user, args.key, args.timeout, args.test_kb)
 
         if speed is not None:
             results.append(speed)
@@ -130,7 +130,7 @@ def main():
 
     parser.add_argument("ips", help="comma-separated IP list")
     parser.add_argument("-n", type=int, default=2, help="parallel threads")
-    parser.add_argument("-l", type=float, default=64, help="min speed in kbit/s")
+    parser.add_argument("-l", type=float, default=0, help="min speed in kbit/s")
     parser.add_argument("-t", "--timeout", type=int, default=10)
 
     parser.add_argument("-i", "--identity", dest="key", default=None)
@@ -139,8 +139,8 @@ def main():
     parser.add_argument("-c", "--count", type=int, default=1,
                         help="number of test runs per IP")
 
-    parser.add_argument("--test-mb", type=int, default=2,
-                        help="payload size per test in MB")
+    parser.add_argument("--test-kb", type=int, default=512,
+                        help="payload size per test in KB")
 
     args = parser.parse_args()
 
