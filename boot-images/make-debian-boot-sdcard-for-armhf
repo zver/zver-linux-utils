@@ -30,7 +30,8 @@ function mount_mmc() {
     mount ${MMC_DEVICE}p1 ${TMPDIR}/boot
 
     for d in /dev /proc /sys /dev/pts; do
-        mount --bind $d  ${TMPDIR}$d
+        mkdir ${TMPDIR}$d > /dev/null 2>&1 || true
+        mount --bind $d ${TMPDIR}$d
     done
 }
 
