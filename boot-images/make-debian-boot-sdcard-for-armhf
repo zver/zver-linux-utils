@@ -6,7 +6,7 @@ MMC_DEVICE=/dev/mmcblk0
 DEBIAN_RELEASE=trixie
 HOSTNAME=cubox
 MAIN_USER="zver"
-ADDITIONAL_PACKAGES="locales systemd-resolved dbus dbus-bin openssh-server sudo python3"
+ADDITIONAL_PACKAGES="locales systemd-resolved dbus dbus-bin openssh-server sudo python3 iptables"
 
 if [[ `whoami` != 'root' ]]; then
     echo "Please run this script with root rights."
