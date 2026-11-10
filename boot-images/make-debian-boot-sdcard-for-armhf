@@ -17,7 +17,7 @@ if [[ ! -e $MMC_DEVICE ]]; then
     exit 1
 fi
 
-if [[ ! which gum > /dev/null 2>&1 ]]; then
+if ! command -v gum > /dev/null 2>&1; then
     echo "Please install gum: https://github.com/charmbracelet/gum"
     exit 1
 fi
