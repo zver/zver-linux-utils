@@ -131,7 +131,7 @@ echo "-----> Second stage"
 test -e /debootstrap/debootstrap && /debootstrap/debootstrap --second-stage
 
 echo "-----> Install packages"
-apt install linux-image-armmp u-boot-tools f2fs-tools locales || true
+apt install linux-image-armmp u-boot-tools f2fs-tools locales systemd-resolved dbus dbus-bin || true
 
 echo "-----> Initramfs"
 cat > /etc/initramfs-tools/modules << EOF
@@ -170,7 +170,8 @@ cat > /etc/fstab << EOF
 ${MMC_DEVICE}p2  /       f2fs    defaults        0       1
 ${MMC_DEVICE}p1  /boot   ext4    defaults        0       2
 EOF
-hostname $HOSTNAME
+hostname $HOSTNAME || true
+echo $HOSTNAME > /etc/hostname
 
 echo "-----> Remove password for root"
 passwd -d root
