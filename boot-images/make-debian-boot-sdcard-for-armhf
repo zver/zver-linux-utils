@@ -6,6 +6,7 @@ MMC_DEVICE=/dev/mmcblk0
 DEBIAN_RELEASE=trixie
 HOSTNAME=cubox
 PACKAGES="qemu-user-static f2fs-tools util-linux fdisk parted"
+MAIN_USER="zver"
 
 if [[ `whoami` != 'root' ]]; then
     echo "Please run this script with root rights."
@@ -55,6 +56,8 @@ function format_boot() {
     mkfs.ext4 -F ${MMC_DEVICE}p1
 }
 
+MAIN_USER_PASS=$(gum input --password --placeholder "Set $MAIN_USER pass if you want set it")
+
 
 apt-get install -y --no-upgrade $PACKAGES
 
@@ -102,7 +105,7 @@ fi
 remount_mmc
 
 if [[ "$NEED_1ST_STAGE" == "y" ]]; then
-    debootstrap --foreign --arch=armhf ${DEBIAN_RELEASE} ${TMPDIR} https://mirror.yandex.ru/debian/
+    debootstrap --foreign --arch=armhf ${DEBIAN_RELEASE} ${TMPDIR} http://mirror.yandex.ru/debian/
 fi
 
 
@@ -118,7 +121,7 @@ fi
 echo "MOUNTS outside chroot"
 mount
 
-chroot ${TMPDIR} env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" /bin/bash <<'END_CHROOT_SCRIPT'
+chroot ${TMPDIR} env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" MAIN_USER="$MAIN_USER" /bin/bash <<'END_CHROOT_SCRIPT'
 set -x
 echo "################## START CHROOT STAGE #######################"
 echo "MOUNTS in chroot:"
@@ -131,7 +134,17 @@ echo "-----> Second stage"
 test -e /debootstrap/debootstrap && /debootstrap/debootstrap --second-stage
 
 echo "-----> Install packages"
-apt install linux-image-armmp u-boot-tools f2fs-tools locales systemd-resolved dbus dbus-bin || true
+apt install \
+    linux-image-armmp \
+    u-boot-tools \
+    f2fs-tools \
+    locales \
+    systemd-resolved \
+    dbus \
+    dbus-bin \
+    openssh-server \
+    sudo \
+    || true
 
 echo "-----> Initramfs"
 cat > /etc/initramfs-tools/modules << EOF
@@ -172,6 +185,13 @@ ${MMC_DEVICE}p1  /boot   ext4    defaults        0       2
 EOF
 hostname $HOSTNAME || true
 echo $HOSTNAME > /etc/hostname
+
+adduser $MAIN_USER
+usermod -aG sudo $MAIN_USER
+echo "$MAIN_USER ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/$MAIN_USER
+chmod 0440 /etc/sudoers.d/$MAIN_USER
+
+[[ -n "$MAIN_USER_PASS" ]] && echo "$MAIN_USER:${MAIN_USER_PASS}" | chpasswd
 
 echo "-----> Remove password for root"
 passwd -d root
