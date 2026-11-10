@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 # Based on https://benou.fr/www/ben/debian-10-on-cubox.html
 # See also https://ambience.sk/reviving-cubox-i-first-gen-marvell-sheeva-with-debian/
 TMPDIR=/tmp/cubox
@@ -115,17 +115,23 @@ if [[ ! -f ${TMPDIR}/usr/bin/qemu-arm-static ]]; then
 
 fi
 
+echo "MOUNTS outside chroot"
 mount
 
 chroot ${TMPDIR} env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" /bin/bash <<'END_CHROOT_SCRIPT'
+set -x
+echo "################## START CHROOT STAGE #######################"
+echo "MOUNTS in chroot:"
+mount
 echo "MMC DEVICE: $MMC_DEVICE"
+
 export LANG=C.UTF-8
 export LANGUAGE=
 echo "-----> Second stage"
 test -e /debootstrap/debootstrap && /debootstrap/debootstrap --second-stage
 
 echo "-----> Install packages"
-apt install linux-image-armmp u-boot-tools f2fs-tools locales
+apt install linux-image-armmp u-boot-tools f2fs-tools locales || true
 
 echo "-----> Initramfs"
 cat > /etc/initramfs-tools/modules << EOF
@@ -168,6 +174,7 @@ hostname $HOSTNAME
 
 echo "-----> Remove password for root"
 passwd -d root
+echo "################## END CHROOT STAGE #######################"
 
 END_CHROOT_SCRIPT
 
