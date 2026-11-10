@@ -5,8 +5,8 @@ TMPDIR=/tmp/cubox
 MMC_DEVICE=/dev/mmcblk0
 DEBIAN_RELEASE=trixie
 HOSTNAME=cubox
-PACKAGES="qemu-user-static f2fs-tools util-linux fdisk parted"
 MAIN_USER="zver"
+ADDITIONAL_PACKAGES="locales systemd-resolved dbus dbus-bin openssh-server sudo"
 
 if [[ `whoami` != 'root' ]]; then
     echo "Please run this script with root rights."
@@ -59,6 +59,8 @@ function format_boot() {
 MAIN_USER_PASS=$(gum input --password --placeholder "Set $MAIN_USER pass if you want set it")
 
 
+PACKAGES="qemu-user-static f2fs-tools util-linux fdisk parted"
+echo "Install packages in local OS for make boot sdcard: $PACKAGES"
 apt-get install -y --no-upgrade $PACKAGES
 
 FORMATED=
@@ -121,7 +123,9 @@ fi
 echo "MOUNTS outside chroot"
 mount
 
-chroot ${TMPDIR} env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" MAIN_USER="$MAIN_USER" /bin/bash <<'END_CHROOT_SCRIPT'
+chroot ${TMPDIR} \
+    env MMC_DEVICE="$MMC_DEVICE" HOSTNAME="$HOSTNAME" MAIN_USER="$MAIN_USER" ADDITIONAL_PACKAGES="$ADDITIONAL_PACKAGES" \
+    /bin/bash <<'END_CHROOT_SCRIPT'
 set -x
 echo "################## START CHROOT STAGE #######################"
 echo "MOUNTS in chroot:"
@@ -138,12 +142,7 @@ apt install \
     linux-image-armmp \
     u-boot-tools \
     f2fs-tools \
-    locales \
-    systemd-resolved \
-    dbus \
-    dbus-bin \
-    openssh-server \
-    sudo \
+    $ADDITIONAL_PACKAGES \
     || true
 
 echo "-----> Initramfs"
