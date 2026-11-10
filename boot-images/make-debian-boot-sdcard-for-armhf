@@ -38,7 +38,7 @@ function umount_mmc() {
     echo "Unmount all mount points"
     for d in `mount | grep $TMPDIR | cut -d ' ' -f3|sort -r`; do umount -f $d; done
     echo "Unmount all mmc device partitions"
-    for p in `mount | grep ^/dev/mmcblk0 | sort -n| cut -d ' ' -f1`; do umount -f $p; done
+    for p in `mount | grep ^${MMC_DEVICE} | sort -n| cut -d ' ' -f1`; do umount -f $p; done
 }
 
 function remount_mmc() {
